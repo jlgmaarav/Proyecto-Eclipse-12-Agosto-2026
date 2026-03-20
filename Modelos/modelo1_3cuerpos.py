@@ -61,51 +61,10 @@ from datetime import datetime, timedelta
 sys.path.insert(0, os.path.dirname(__file__))
 from benchmark import eclipse_error, print_benchmark, load_reference_data, ECLIPSE_UTC
 
-# ─── CONSTANTES FÍSICAS ───────────────────────────────────────────────────────
-AU  = 1.495978707e11   # m
-DAY = 86400.0          # s
-G   = 6.6743e-11 * DAY**2 / AU**3   # AU³ / (kg·día²)
-
-# Masas (kg)
-mS = 1.98892e30
-mE = 5.97219e24
-mL = 7.34581e22
-
-# Momentos de inercia de la Tierra (kg·m², convertidos a kg·AU²)
-# Tierra real: geoide achatado
-# I⊥ = 8.0096e37 kg·m²  (momento ecuatorial)
-# Iz = 8.0358e37 kg·m²  (momento polar, mayor por achatamiento)
-_m2_to_AU2 = 1.0 / AU**2
-I_perp = 8.0096e37 * _m2_to_AU2   # kg·AU²
-I_z    = 8.0358e37 * _m2_to_AU2   # kg·AU²
-dI     = I_z - I_perp              # Iz - I⊥ > 0
-
-# GM precalculados en AU³/día²
-GmS = G * mS
-GmE = G * mE
-GmL = G * mL
-
-# ─── CONDICIONES INICIALES DE ROTACIÓN TERRESTRE ─────────────────────────────
-# La Tierra rota una vez cada ~0.9973 días sidéreos.
-# Condición inicial: eje polar apuntando hacia el polo norte eclíptico (aprox).
-# En J2000 eclíptico, el eje terrestre tiene oblicuidad ε = 23.44°.
-# θ = oblicuidad respecto al polo eclíptico = 23.44°
-# ψ̇ = velocidad de rotación propia = 2π / 0.9973 rad/día ≈ 6.3003 rad/día
-# ϕ̇ = precesión lunisolar ≈ −2π / (25772 años) → despreciable en 7 meses
-
-eps       = np.radians(23.4393)     # oblicuidad J2000
-theta_0   = eps                     # θ inicial
-phi_0     = 0.0                     # ϕ inicial (longitud del nodo ascendente)
-psi_0     = 0.0                     # ψ inicial (ángulo de rotación propia)
-
-omega_rot = 2 * np.pi / 0.9972697   # rad/día (período sidéreo)
-phi_dot_0 = 0.0                     # precesión despreciable
-psi_dot_0 = omega_rot - phi_dot_0 * np.cos(theta_0)  # ψ̇ + ϕ̇cosθ = Ω_rot
-
-# Momentos conjugados iniciales de la rotación
-ptheta_0 = I_perp * 0.0             # θ̇ = 0 (eje polar estable)
-ppsi_0   = I_z * psi_dot_0          # pψ = Iz·(ψ̇ + ϕ̇cosθ)
-pphi_0   = I_perp * phi_dot_0 * np.sin(theta_0)**2 + ppsi_0 * np.cos(theta_0)
+# ─── CONSTANTES FÍSICAS (importadas) ─────────────────────────────────────────
+from constantes import (AU, DAY, G, mS, mE, mL, I_perp, I_z, dI,
+                        GmS, GmE, GmL, theta_0, phi_0, psi_0,
+                        ptheta_0, pphi_0, ppsi_0, C_YOSHIDA, D_YOSHIDA)
 
 # ─── ÍNDICES EN EL VECTOR DE ESTADO ──────────────────────────────────────────
 # Sol
@@ -304,12 +263,8 @@ def derivadas(state):
 
 
 # ─── INTEGRADOR YOSHIDA O(4) SIMPLÉCTICO ─────────────────────────────────────
-# Mismo integrador que v10. Coeficientes de Yoshida (1990).
-
-_w1 = 1.0 / (2.0 - 2.0**(1.0/3.0))
-_w0 = -2.0**(1.0/3.0) * _w1
-_C  = np.array([_w1/2, (_w0+_w1)/2, (_w0+_w1)/2, _w1/2])
-_D  = np.array([_w1, _w0, _w1])
+_C = C_YOSHIDA
+_D = D_YOSHIDA
 
 # Índices de posiciones y momentos en el vector de estado
 _IDX_Q = np.array([IxS,IyS,IzS, IxE,IyE,IzE, IxL,IyL,IzL, Ith,Iph,Ips])

@@ -52,27 +52,45 @@ FECHAS_CONTROL = [
 # Planetas: Mercurio=199, Venus=299, Marte=499,
 #           Júpiter=599, Saturno=699, Urano=799, Neptuno=899
 
-REFERENCE_FILE = "jpl_reference_data.json"
+REFERENCE_FILE = "Datos/jpl_reference_data.json"
 
 # ─── 1. DESCARGA DE DATOS DE REFERENCIA ──────────────────────────────────────
 
 def fetch_reference_data():
     """
-    Descarga posiciones y velocidades de JPL Horizons para Sol, Tierra y Luna
-    en las fechas de control, más la posición exacta en el momento del eclipse.
+    Descarga posiciones y velocidades de JPL Horizons para Sol, Tierra, Luna
+    y todos los planetas en las fechas de control.
+
+    Intenta primero con astroquery (más limpio), y si no está disponible
+    usa la API REST directa con un parser robusto.
 
     Requiere: pip install requests
+    Opcional: pip install astroquery astropy   (recomendado, más fiable)
+
     Guarda: jpl_reference_data.json
     """
+    # Intentar con astroquery primero
+    try:
+        from astroquery.jplhorizons import Horizons
+        print("Usando astroquery.jplhorizons")
+        return _fetch_con_astroquery(Horizons)
+    except ImportError:
+        print("astroquery no disponible, usando API REST directa.")
+        print("(Para mejores resultados: pip install astroquery astropy)")
+
+    # Fallback: API REST
     try:
         import requests
     except ImportError:
-        print("ERROR: instala requests con:  pip install requests")
+        print("ERROR: instala requests:  pip install requests")
         return False
 
-    BASE_URL = "https://ssd.jpl.nasa.gov/api/horizons.api"
+    return _fetch_con_requests(requests)
 
-    # Cuerpos a consultar: (id_jpl, nombre)
+
+def _fetch_con_astroquery(Horizons):
+    """Descarga datos usando astroquery (más robusto)."""
+    # id JPL -> nombre
     cuerpos = [
         ("10",  "Sol"),
         ("399", "Tierra"),
@@ -86,61 +104,46 @@ def fetch_reference_data():
         ("899", "Neptuno"),
     ]
 
-    # Centro: baricentro del sistema solar (500@0)
-    # Plano de referencia: eclíptica J2000
-    # Unidades: AU y AU/día
-
     datos = {}
 
     for fecha in FECHAS_CONTROL:
-        fecha_str = fecha.strftime("%Y-%b-%d %H:%M")
-        # Horizons necesita una ventana: pedimos 1 minuto
-        fecha_fin = fecha + timedelta(minutes=1)
-        fecha_fin_str = fecha_fin.strftime("%Y-%b-%d %H:%M")
+        # JD de la fecha
+        from astropy.time import Time
+        t = Time(fecha.isoformat(), format='isot', scale='utc')
+        jd = t.jd
 
+        fecha_str = fecha.strftime("%Y-%b-%d %H:%M")
         print(f"\nFecha: {fecha_str}")
         datos[fecha.isoformat()] = {}
 
         for jpl_id, nombre in cuerpos:
-            params = {
-                "format":      "json",
-                "COMMAND":     f"'{jpl_id}'",
-                "OBJ_DATA":    "NO",
-                "MAKE_EPHEM":  "YES",
-                "EPHEM_TYPE":  "VECTORS",
-                "CENTER":      "500@0",          # baricentro solar
-                "START_TIME":  f"'{fecha_str}'",
-                "STOP_TIME":   f"'{fecha_fin_str}'",
-                "STEP_SIZE":   "'1 m'",
-                "VEC_TABLE":   "2",              # posición + velocidad
-                "REF_PLANE":   "ECLIPTIC",
-                "REF_SYSTEM":  "J2000",
-                "OUT_UNITS":   "AU-D",
-                "VEC_LABELS":  "YES",
-                "CSV_FORMAT":  "NO",
-            }
-
             try:
-                r = requests.get(BASE_URL, params=params, timeout=30)
-                r.raise_for_status()
-                resultado = r.json()
+                obj = Horizons(
+                    id=jpl_id,
+                    location="500@0",   # baricentro solar
+                    epochs=jd,
+                    id_type="majorbody",
+                )
+                vecs = obj.vectors(refplane="ecliptic")
 
-                if "result" not in resultado:
-                    print(f"  {nombre}: ERROR — sin campo 'result'")
-                    continue
+                x  = float(vecs["x"][0])
+                y  = float(vecs["y"][0])
+                z  = float(vecs["z"][0])
+                vx = float(vecs["vx"][0])
+                vy = float(vecs["vy"][0])
+                vz = float(vecs["vz"][0])
 
-                # Parsear el bloque de vectores
-                rv = _parse_horizons_vectors(resultado["result"])
-                if rv:
-                    datos[fecha.isoformat()][nombre] = rv
-                    print(f"  {nombre}: r={rv['r']:.6f} AU  OK")
-                else:
-                    print(f"  {nombre}: ERROR al parsear")
+                r = np.sqrt(x**2 + y**2 + z**2)
+                datos[fecha.isoformat()][nombre] = {
+                    "pos": [x, y, z],
+                    "vel": [vx, vy, vz],
+                    "r":   float(r),
+                }
+                print(f"  {nombre}: r={r:.6f} AU  OK")
 
             except Exception as e:
-                print(f"  {nombre}: EXCEPCIÓN — {e}")
+                print(f"  {nombre}: ERROR — {e}")
 
-    # Guardar
     with open(REFERENCE_FILE, "w") as f:
         json.dump(datos, f, indent=2)
 
@@ -148,41 +151,118 @@ def fetch_reference_data():
     return True
 
 
-def _parse_horizons_vectors(text):
+def _fetch_con_requests(requests):
+    """Descarga datos usando la API REST de Horizons con parser robusto."""
+
+    BASE_URL = "https://ssd.jpl.nasa.gov/api/horizons.api"
+
+    cuerpos = [
+        ("10",  "Sol"),
+        ("399", "Tierra"),
+        ("301", "Luna"),
+        ("199", "Mercurio"),
+        ("299", "Venus"),
+        ("499", "Marte"),
+        ("599", "Jupiter"),
+        ("699", "Saturno"),
+        ("799", "Urano"),
+        ("899", "Neptuno"),
+    ]
+
+    datos = {}
+
+    for fecha in FECHAS_CONTROL:
+        fecha_str = fecha.strftime("%Y-%b-%d %H:%M")
+        fecha_fin = fecha + timedelta(minutes=2)
+        fecha_fin_str = fecha_fin.strftime("%Y-%b-%d %H:%M")
+
+        print(f"\nFecha: {fecha_str}")
+        datos[fecha.isoformat()] = {}
+
+        for jpl_id, nombre in cuerpos:
+            params = {
+                "format":     "text",        # texto plano, más fácil de parsear
+                "COMMAND":    jpl_id,
+                "OBJ_DATA":   "NO",
+                "MAKE_EPHEM": "YES",
+                "EPHEM_TYPE": "VECTORS",
+                "CENTER":     "500@0",
+                "START_TIME": fecha_str,
+                "STOP_TIME":  fecha_fin_str,
+                "STEP_SIZE":  "1 m",
+                "VEC_TABLE":  "2",
+                "REF_PLANE":  "ECLIPTIC",
+                "REF_SYSTEM": "J2000",
+                "OUT_UNITS":  "AU-D",
+                "VEC_LABELS": "YES",
+                "CSV_FORMAT": "NO",
+            }
+
+            try:
+                r = requests.get(BASE_URL, params=params, timeout=30)
+                r.raise_for_status()
+                texto = r.text
+
+                rv = _parse_horizons_texto(texto)
+                if rv:
+                    datos[fecha.isoformat()][nombre] = rv
+                    print(f"  {nombre}: r={rv['r']:.6f} AU  OK")
+                else:
+                    # Mostrar primeras líneas para diagnóstico
+                    print(f"  {nombre}: ERROR al parsear")
+                    for ln in texto.split("\n")[:5]:
+                        if ln.strip():
+                            print(f"    >> {ln[:80]}")
+
+            except Exception as e:
+                print(f"  {nombre}: EXCEPCION — {e}")
+
+    with open(REFERENCE_FILE, "w") as f:
+        json.dump(datos, f, indent=2)
+
+    print(f"\n✓ Datos guardados en {REFERENCE_FILE}")
+    return True
+
+
+def _parse_horizons_texto(text):
     """
-    Extrae posición y velocidad del bloque de texto de Horizons VECTORS.
-    Devuelve dict con 'pos' [AU], 'vel' [AU/día], 'r' [AU].
+    Parser robusto para el formato de texto de Horizons VECTORS.
+
+    Busca en todo el texto las líneas con X/Y/Z y VX/VY/VZ.
+    El formato real de Horizons es:
+      " X = 1.234E+00 Y =-9.876E-01 Z = 1.234E-04"
+      " VX= 1.234E-02 VY= 1.234E-02 VZ=-1.234E-06"
     """
-    lines = text.split("\n")
+    import re
+
     pos = None
     vel = None
 
-    for i, line in enumerate(lines):
-        # Las líneas de datos tienen el formato:
-        # X = ... Y = ... Z = ...
-        # VX= ... VY= ... VZ= ...
-        if "X =" in line and "Y =" in line and "Z =" in line:
-            try:
-                parts = line.split()
-                x = float(parts[parts.index("X") + 2])
-                y = float(parts[parts.index("Y") + 2])
-                z = float(parts[parts.index("Z") + 2])
-                pos = [x, y, z]
-            except Exception:
-                pass
-        if "VX=" in line and "VY=" in line and "VZ=" in line:
-            try:
-                parts = line.split()
-                vx = float(parts[parts.index("VX=") + 1])
-                vy = float(parts[parts.index("VY=") + 1])
-                vz = float(parts[parts.index("VZ=") + 1])
-                vel = [vx, vy, vz]
-            except Exception:
-                pass
+    for line in text.split("\n"):
+        line_s = line.strip()
+        if not line_s:
+            continue
 
-    if pos and vel:
-        r = np.linalg.norm(pos)
-        return {"pos": pos, "vel": vel, "r": float(r)}
+        # Línea de posición: contiene X = y Y = (pero NO empieza con V)
+        # El regex captura los tres valores aunque haya signo pegado al =
+        if pos is None and re.search(r'\bX\s*=', line_s) and re.search(r'\bY\s*=', line_s):
+            # Capturar números en notación científica (con posible signo pegado)
+            nums = re.findall(r'[XYZ]\s*=\s*([+-]?\d+\.\d+[Ee][+-]?\d+)', line_s)
+            if len(nums) >= 3:
+                pos = [float(nums[0]), float(nums[1]), float(nums[2])]
+
+        # Línea de velocidad: contiene VX= y VY=
+        if vel is None and re.search(r'\bVX\s*=', line_s) and re.search(r'\bVY\s*=', line_s):
+            nums = re.findall(r'V[XYZ]\s*=\s*([+-]?\d+\.\d+[Ee][+-]?\d+)', line_s)
+            if len(nums) >= 3:
+                vel = [float(nums[0]), float(nums[1]), float(nums[2])]
+
+        if pos is not None and vel is not None:
+            break
+
+    if pos is not None and vel is not None:
+        r = float(np.linalg.norm(pos))
+        return {"pos": pos, "vel": vel, "r": r}
     return None
 
 
@@ -381,20 +461,45 @@ def demo_con_v10():
     print("\nPara descargar datos de referencia: python benchmark.py --fetch\n")
 
 
-def verificar_datos():
-    """Muestra un resumen de los datos de referencia descargados."""
-    datos = load_reference_data()
-    if datos is None:
-        return
-
-    print("\nResumen de datos de referencia:")
-    for fecha_iso, cuerpos in datos.items():
-        fecha = datetime.fromisoformat(fecha_iso)
-        print(f"\n  {fecha.strftime('%d %b %Y  %H:%M UTC')}")
-        for nombre, rv in cuerpos.items():
-            pos = rv["pos"]
-            print(f"    {nombre:<12}  r={rv['r']:.6f} AU  "
-                  f"pos=({pos[0]:+.4f}, {pos[1]:+.4f}, {pos[2]:+.4f})")
+def comparar_todos():
+    """Ejecuta los cuatro modelos secuencialmente y los compara en una tabla."""
+    import sys
+    import os
+    sys.path.insert(0, os.path.join(os.path.dirname(__file__), 'Modelos'))
+    
+    import modelo1_3cuerpos as m1
+    import modelo2_ncuerpos as m2
+    import modelo3_relativista as m3
+    import modelo4_besseliano as m4
+    
+    print("─" * 60)
+    print("EJECUTANDO BENCHMARK GLOBAL (h=0.05 días)")
+    print("─" * 60)
+    
+    ref = load_reference_data()
+    ci_ene = ref.get(datetime(2026,1,1).isoformat()) if ref else None
+    
+    resultados = []
+    h_step = 0.05
+    
+    print("\n[1/4] Ejecutando Modelo 1 (3-Cuerpos + J2 + Rotación)...")
+    r1 = m1.run(ci_dict=ci_ene, h=h_step, verbose=False)
+    if r1: resultados.append(r1)
+    
+    print("[2/4] Ejecutando Modelo 2 (N-Cuerpos)...")
+    r2 = m2.run(h=h_step, verbose=False)
+    if r2: resultados.append(r2)
+    
+    print("[3/4] Ejecutando Modelo 3 (N-Cuerpos + Relatividad EIH)...")
+    r3 = m3.run(h=h_step, verbose=False)
+    if r3: resultados.append(r3)
+    
+    print("[4/4] Ejecutando Modelo 4 (Híbrido Simulador + Geometría NASA)...")
+    r4 = m4.run(h=h_step, verbose=False)
+    if r4: resultados.append(r4)
+    
+    if resultados:
+        print_benchmark(resultados)
 
 
 # ─── MAIN ────────────────────────────────────────────────────────────────────
@@ -408,6 +513,8 @@ if __name__ == "__main__":
                         help="Verificar datos descargados")
     parser.add_argument("--demo",  action="store_true",
                         help="Demo con datos de v10")
+    parser.add_argument("--all",   action="store_true",
+                        help="Ejecutar y comparar los 4 modelos finales")
     args = parser.parse_args()
 
     if args.fetch:
@@ -416,6 +523,8 @@ if __name__ == "__main__":
         verificar_datos()
     elif args.demo:
         demo_con_v10()
+    elif args.all:
+        comparar_todos()
     else:
         parser.print_help()
         print("\nEjemplos:")
