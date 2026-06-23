@@ -1,0 +1,9 @@
+=== CONSTANTES FÍSICAS EXTRAÍDAS DE DE441 ===
+
+
+
+Otros valores (de cabeceras):
+Radio ecuatorial Tierra ≈ 6378.137 km
+J2 Tierra ≈ 0.00108262545
+Radio Sol ≈ 696000 km
+Radio Luna ≈ 1737.4 km
