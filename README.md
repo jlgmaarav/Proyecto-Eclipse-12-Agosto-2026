@@ -99,4 +99,4 @@ python model_s3.py
 ## Documentación Teórica
 
 Para comprender la deducción analítica de las Lagrangianas de rotación de la Tierra, los ángulos de Euler acoplados a la órbita, el tensor de inercia y los potenciales de EIH, se recomienda encarecidamente consultar:
-*   [Diario Proyecto Eclipse 3.pdf](Diario%20Proyecto%20Eclipse%203.pdf) (Documentación matemática definitiva del proyecto).
+*   [Diario de Eclipse.pdf](Diario%20de%20Eclipse.pdf) (Documentación matemática definitiva del proyecto).
