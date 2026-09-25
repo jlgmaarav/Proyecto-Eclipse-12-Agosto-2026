@@ -10,6 +10,10 @@ Este repositorio contiene una simulación de física y geometría celeste de alt
 
 El proyecto resuelve la astrodinámica del sistema solar utilizando un integrador multipaso **Adams-Bashforth-Moulton de 4º orden (ABM4)** acoplado a correcciones relativistas (EIH) y de marea. Posteriormente, la sombra se proyecta sobre el elipsoide terrestre **WGS84** aplicando el formalismo de los **Elementos Besselianos**, corregido dinámicamente por el desfase de rotación terrestre ($\Delta T$) y la topografía real de la Luna (sensor altimétrico **LOLA de la NASA**) para simular las **Perlas de Baily (Baily's beads)**.
 
+## Desarrollo asistido por IA
+
+La IA generativa se utilizó para generar e iterar parte del código, a partir de la idea y la dirección propias del autor. El proyecto combina esa colaboración con aportaciones propias en su desarrollo.
+
 ---
 
 ## Estructura del Proyecto
@@ -64,8 +68,8 @@ Una vez obtenidas las coordenadas orbitales tridimensionales en el momento del e
 Para clonar y ejecutar este simulador, requiere **Python 3.8+** y las librerías listadas en `requirements.txt`:
 
 ```bash
-git clone https://github.com/tu_usuario/prediccion_eclipse.git
-cd prediccion_eclipse
+git clone https://github.com/jlgmaarav/Proyecto-Eclipse-12-Agosto-2026.git
+cd Proyecto-Eclipse-12-Agosto-2026
 pip install -r requirements.txt
 ```
 
